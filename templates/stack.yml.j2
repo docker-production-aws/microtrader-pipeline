@@ -3,6 +3,76 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Microtrader Pipeline
 
 Resources:
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+      Policies:
+        - PolicyName: CodePipelinePermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PipelineBucketPermissions
+                Effect: Allow
+                Action:
+                  - s3:DeleteObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListBucket
+                  - s3:PutObject
+                Resource:
+                  - Fn::Sub: arn:aws:s3:::${PipelineBucket}
+                  - Fn::Sub: arn:aws:s3:::${PipelineBucket}/*
+              - Sid: CodeBuildPermissions
+                Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource:
+                  - Fn::Sub: arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/microtrader
+                  - Fn::Sub: arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/microtrader-deploy
+              - Sid: PassCloudFormationServiceRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - Fn::Sub: ${CloudFormationServiceRole.Arn}
+              - Sid: CloudFormationPermissions
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:CreateStack
+                  - cloudformation:CreateUploadBucket
+                  - cloudformation:DeleteStack
+                  - cloudformation:Describe*
+                  - cloudformation:List*
+                  - cloudformation:UpdateStack
+                  - cloudformation:ValidateTemplate
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:SetStackPolicy
+                Resource:
+                  - Fn::Sub: arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/microtrader-development*
+                  - Fn::Sub: arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/microtrader-production*
+  CloudFormationServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
   PipelineBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -12,3 +82,13 @@ Resources:
         - Key: Name
           Value:
             Fn::Sub: ${AWS::AccountId}-${AWS::StackName}
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: microtrader
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: PipelineBucket
+      RoleArn:
+        Fn::Sub: ${PipelineRole.Arn}
