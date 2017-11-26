@@ -2,7 +2,80 @@ AWSTemplateFormatVersion: "2010-09-09"
 
 Description: Microtrader Pipeline
 
+Parameters:
+  GithubToken:
+    Type: String
+    Description: GitHub Personal Access Token
+    NoEcho: true
+
 Resources:
+  SecretsProvisionerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      Policies:
+        - PolicyName: SecretsProvisionerPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Sid: Encrypt
+              Effect: Allow
+              Action:
+              - kms:Decrypt
+              - kms:Encrypt
+              Resource:
+                Fn::ImportValue: CfnMasterKeyArn
+            - Sid: ProvisionSecrets
+              Effect: Allow
+              Action:
+              - ssm:GetParameters
+              - ssm:PutParameter
+              - ssm:DeleteParameter
+              - ssm:AddTagsToResource
+              - ssm:ListTagsForResource
+              Resource:
+                Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/*
+            - Sid: ManageLambdaLogs
+              Effect: Allow
+              Action:
+              - logs:CreateLogStream
+              - logs:DescribeLogStreams
+              - logs:PutLogEvents
+              Resource:
+                Fn::Sub: ${SecretsProvisionerLogGroup.Arn}
+  SecretsProvisioner:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - SecretsProvisionerLogGroup
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-secretsProvisioner
+      Description:
+        Fn::Sub: ${AWS::StackName} Secrets Provisioner
+      Handler: secrets_provisioner.handler
+      MemorySize: 128
+      Runtime: python2.7
+      Timeout: 300
+      Code:
+        S3Bucket:
+          Fn::Sub: ${AWS::AccountId}-cfn-lambda
+        S3Key: secretsProvisioner.zip
+      Role:
+        Fn::Sub: ${SecretsProvisionerRole.Arn}
+  SecretsProvisionerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-secretsProvisioner
+      RetentionInDays: 7
   PipelineRole:
     Type: AWS::IAM::Role
     Properties:
@@ -92,3 +165,46 @@ Resources:
           Ref: PipelineBucket
       RoleArn:
         Fn::Sub: ${PipelineRole.Arn}
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: microtrader
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              Configuration:
+                Owner: jmenga
+                Repo: microtrader
+                Branch: master
+                OAuthToken:
+                  Fn::Sub: ${GithubSecret.Value}
+              OutputArtifacts:
+                - Name: SourceRepository
+            - Name: microtrader-deploy
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              Configuration:
+                Owner: jmenga
+                Repo: microtrader-deploy
+                Branch: master
+                OAuthToken:
+                  Fn::Sub: ${GithubSecret.Value}
+              OutputArtifacts:
+                - Name: DeploymentRepository
+  GithubSecret:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::Sub: ${SecretsProvisioner.Arn}
+      Name:
+        Fn::Sub: /${AWS::StackName}/github/token
+      Key: GITHUB_TOKEN
+      Value:
+        Ref: GithubToken
+      KmsKeyId:
+        Fn::ImportValue: CfnMasterKey
