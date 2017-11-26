@@ -334,6 +334,68 @@ Resources:
                 - Name: DeploymentRepository
               OutputArtifacts:
                 - Name: DeploymentTemplates
+        - Name: Development
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: 1
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn:
+                  Fn::Sub: ${CloudFormationServiceRole.Arn}
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: microtrader-development
+                TemplatePath: DeploymentTemplates::build/microtrader-development-stack.json
+                TemplateConfiguration: DeploymentTemplates::build/microtrader-development-config.json
+                ParameterOverrides: >-
+                  {"MicrotraderImageTag":{"Fn::GetParam": ["ApplicationVersion","build/version.json","Version"]}}
+              InputArtifacts:
+                - Name: DeploymentTemplates
+                - Name: ApplicationVersion
+        - Name: Production
+          Actions:
+            - Name: ChangeSet
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: 1
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                ChangeSetName: production-changeset
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: microtrader-production
+                TemplatePath: DeploymentTemplates::build/microtrader-production-stack.json
+                TemplateConfiguration: DeploymentTemplates::build/microtrader-production-config.json
+                ParameterOverrides: >-
+                  {"MicrotraderImageTag":{"Fn::GetParam": ["ApplicationVersion","build/version.json","Version"]}}
+                RoleArn:
+                  Fn::Sub: ${CloudFormationServiceRole.Arn}
+              InputArtifacts:
+                - Name: DeploymentTemplates
+                - Name: ApplicationVersion
+              RunOrder: 1
+            - Name: Approval
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: 1
+              RunOrder: 2
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: 1
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                ChangeSetName: production-changeset
+                StackName: microtrader-production
+              RunOrder: 3
   GithubSecret:
     Type: AWS::CloudFormation::CustomResource
     Properties:
