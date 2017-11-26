@@ -1,0 +1,2 @@
+# STS role and target account
+Sts.Role: arn:aws:iam::543279062384:role/admin
