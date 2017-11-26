@@ -155,6 +155,116 @@ Resources:
         - Key: Name
           Value:
             Fn::Sub: ${AWS::AccountId}-${AWS::StackName}
+  MicrotraderBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+      Policies:
+        - PolicyName: CodeBuildPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - arn:aws:logs:us-west-2:543279062384:log-group:/aws/codebuild/microtrader
+                  - arn:aws:logs:us-west-2:543279062384:log-group:/aws/codebuild/microtrader:*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  Fn::Sub: arn:aws:s3:::${PipelineBucket}/*
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource:
+                  Fn::Sub: arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/dockerproductionaws/microtrader*
+  MicrotraderDeployBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+      Policies:
+        - PolicyName: CodeBuildPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - arn:aws:logs:us-west-2:543279062384:log-group:/aws/codebuild/microtrader-deploy
+                  - arn:aws:logs:us-west-2:543279062384:log-group:/aws/codebuild/microtrader-deploy:*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  - Fn::Sub: arn:aws:s3:::${PipelineBucket}/*
+  MicrotraderDeployBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: microtrader-deploy
+      Source:
+        Type: CODEPIPELINE
+      Artifacts:
+        Packaging: NONE
+        Type: CODEPIPELINE
+        Name: microtrader-deploy
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: 543279062384.dkr.ecr.us-west-2.amazonaws.com/dockerproductionaws/codebuild:latest
+        Type: LINUX_CONTAINER
+      ServiceRole:
+        Fn::Sub: ${MicrotraderDeployBuildRole.Arn}
+  MicrotraderBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: microtrader
+      Source:
+        Type: CODEPIPELINE
+      Artifacts:
+        Packaging: NONE
+        Type: CODEPIPELINE
+        Name: microtrader
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        PrivilegedMode: true
+        Image: 543279062384.dkr.ecr.us-west-2.amazonaws.com/dockerproductionaws/codebuild:latest
+        Type: LINUX_CONTAINER
+      ServiceRole:
+        Fn::Sub: ${MicrotraderBuildRole.Arn}
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -196,6 +306,34 @@ Resources:
                   Fn::Sub: ${GithubSecret.Value}
               OutputArtifacts:
                 - Name: DeploymentRepository
+        - Name: Build
+          Actions:
+            - Name: Image
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName:
+                  Ref: MicrotraderBuild
+              InputArtifacts:
+                - Name: SourceRepository
+              OutputArtifacts:
+                - Name: ApplicationVersion
+            - Name: Templates
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName:
+                  Ref: MicrotraderDeployBuild
+              InputArtifacts:
+                - Name: DeploymentRepository
+              OutputArtifacts:
+                - Name: DeploymentTemplates
   GithubSecret:
     Type: AWS::CloudFormation::CustomResource
     Properties:
